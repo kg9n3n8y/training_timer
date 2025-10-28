@@ -1,0 +1,22 @@
+{
+  "name": "セットトレーニングタイマー",
+  "short_name": "トレタイマー",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f9fafc",
+  "theme_color": "#ffac33",
+  "description": "トレーニング時間と休憩をセット単位で管理できる筋トレタイマー",
+  "icons": [
+    {
+      "src": "thumbnail.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
