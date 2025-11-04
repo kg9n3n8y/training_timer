@@ -13,6 +13,7 @@
   const restSecondsValue = document.getElementById('restSecondsValue');
   const setCountValue = document.getElementById('setCountValue');
   const phaseLiveRegion = document.getElementById('phaseLiveRegion');
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 
   const ONE_SECOND_MS = 1000;
   const COUNTDOWN_SECONDS = 3;
@@ -54,6 +55,7 @@
   let totalStartTs = 0;
   let countdownStartTs = 0;
   let countdownRaf = 0;
+  let audioCtx = null;
 
   function clampNumber(value, min, max, fallback, step = 1) {
     if (!Number.isFinite(value)) return fallback;
@@ -239,6 +241,55 @@
     }
   }
 
+  function prepareAudioContext() {
+    if (audioCtx || !AudioContextClass) return;
+    try {
+      audioCtx = new AudioContextClass();
+    } catch (_) {
+      audioCtx = null;
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+
+  function playPhaseSound(phaseType) {
+    if (!AudioContextClass) return;
+    if (!audioCtx) {
+      prepareAudioContext();
+    }
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+      if (audioCtx.state !== 'running') {
+        return;
+      }
+    }
+    const now = audioCtx.currentTime;
+    const preset = (() => {
+      if (phaseType === 'work') {
+        return { start: 880, end: 1046.5 };
+      }
+      if (phaseType === 'finish') {
+        return { start: 659.25, end: 987.77 };
+      }
+      return { start: 523.25, end: 392 };
+    })();
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(preset.start, now);
+    oscillator.frequency.linearRampToValueAtTime(preset.end, now + 0.2);
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+
+    oscillator.connect(gain).connect(audioCtx.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.55);
+  }
+
   function reset() {
     stopCountdown();
     isRunning = false;
@@ -301,6 +352,7 @@
     updateProgress(0);
     timerRaf = requestAnimationFrame(loop);
     tryVibrate([60, 40, 60]);
+    playPhaseSound(first.type);
   }
 
   function finish() {
@@ -310,6 +362,7 @@
     updatePhaseLabel('完了!');
     countdownLabel.textContent = '0';
     tryVibrate([80, 60, 80, 60, 120]);
+    playPhaseSound('finish');
     setTimeout(() => {
       reset();
     }, 1500);
@@ -336,12 +389,17 @@
       countdownLabel.textContent = String(nextPhase.duration);
       const vibePattern = nextPhase.type === 'work' ? [100, 50, 100] : [60, 40, 60];
       tryVibrate(vibePattern);
+      playPhaseSound(nextPhase.type);
     }
 
     timerRaf = requestAnimationFrame(loop);
   }
 
   function onButtonClick() {
+    prepareAudioContext();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
     if (isRunning || isCountdown) {
       reset();
     } else {

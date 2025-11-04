@@ -8,6 +8,12 @@
   "description": "トレーニング時間と休憩をセット単位で管理できる筋トレタイマー",
   "icons": [
     {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "thumbnail.png",
       "sizes": "512x512",
       "type": "image/png"
