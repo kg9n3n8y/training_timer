@@ -1,6 +1,6 @@
 {
-  "name": "セットトレーニングタイマー",
-  "short_name": "トレタイマー",
+  "name": "筋トレタイマー",
+  "short_name": "筋トレタイマー",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#f9fafc",
