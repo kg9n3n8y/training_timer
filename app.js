@@ -57,6 +57,12 @@
   let countdownRaf = 0;
   let audioCtx = null;
 
+  function shouldResumeAudioContext(ctx) {
+    if (!ctx) return false;
+    const { state } = ctx;
+    return state === 'suspended' || state === 'interrupted';
+  }
+
   const BELL_PARTIALS = [
     { ratio: 1, gain: 1, decay: 1.9, detune: -6 },
     { ratio: 2.01, gain: 0.55, decay: 1.7, detune: 4 },
@@ -281,13 +287,17 @@
   }
 
   function prepareAudioContext() {
-    if (audioCtx || !AudioContextClass) return;
+    if (!AudioContextClass) return;
+    if (audioCtx && audioCtx.state === 'closed') {
+      audioCtx = null;
+    }
+    if (audioCtx) return;
     try {
       audioCtx = new AudioContextClass();
     } catch (_) {
       audioCtx = null;
     }
-    if (audioCtx && audioCtx.state === 'suspended') {
+    if (shouldResumeAudioContext(audioCtx)) {
       audioCtx.resume().catch(() => {});
     }
   }
@@ -348,13 +358,16 @@
 
   function playPhaseSound(phaseType) {
     if (!AudioContextClass) return;
-    if (!audioCtx) {
+    if (!audioCtx || audioCtx.state === 'closed') {
+      if (audioCtx && audioCtx.state === 'closed') {
+        audioCtx = null;
+      }
       prepareAudioContext();
     }
     if (!audioCtx) return;
-    if (audioCtx.state === 'suspended') {
+    if (shouldResumeAudioContext(audioCtx)) {
       audioCtx.resume().catch(() => {});
-      if (audioCtx.state !== 'running') {
+      if (!audioCtx || audioCtx.state !== 'running') {
         return;
       }
     }
@@ -493,7 +506,13 @@
 
   function onButtonClick() {
     prepareAudioContext();
-    if (audioCtx && audioCtx.state === 'suspended') {
+    if (!audioCtx || audioCtx.state === 'closed') {
+      if (audioCtx && audioCtx.state === 'closed') {
+        audioCtx = null;
+      }
+      prepareAudioContext();
+    }
+    if (shouldResumeAudioContext(audioCtx)) {
       audioCtx.resume().catch(() => {});
     }
     if (isRunning || isCountdown) {
@@ -645,10 +664,17 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (!isRunning) return;
     if (document.hidden) {
-      reset();
+      if (audioCtx && typeof audioCtx.close === 'function') {
+        audioCtx.close().catch(() => {});
+      }
+      audioCtx = null;
+      if (isRunning) {
+        reset();
+      }
+      return;
     }
+    if (!isRunning) return;
   });
 
   applyConfig();
