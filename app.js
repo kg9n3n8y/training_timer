@@ -57,6 +57,45 @@
   let countdownRaf = 0;
   let audioCtx = null;
 
+  const BELL_PARTIALS = [
+    { ratio: 1, gain: 1, decay: 1.9, detune: -6 },
+    { ratio: 2.01, gain: 0.55, decay: 1.7, detune: 4 },
+    { ratio: 2.71, gain: 0.3, decay: 1.6, detune: -2 },
+    { ratio: 3.8, gain: 0.2, decay: 1.45, detune: 3 },
+    { ratio: 5.15, gain: 0.12, decay: 1.3, detune: -4 },
+  ];
+
+  const BELL_CONFIGS = {
+    work: {
+      baseFrequency: 987.77,
+      strikes: 2,
+      strikeInterval: 0.12,
+      decay: 1.4,
+      level: 0.85,
+    },
+    rest: {
+      baseFrequency: 659.25,
+      strikes: 1,
+      strikeInterval: 0,
+      decay: 1.6,
+      level: 0.7,
+    },
+    finish: {
+      baseFrequency: 1318.5,
+      strikes: 3,
+      strikeInterval: 0.14,
+      decay: 1.7,
+      level: 0.95,
+    },
+    default: {
+      baseFrequency: 880,
+      strikes: 1,
+      strikeInterval: 0,
+      decay: 1.5,
+      level: 0.75,
+    },
+  };
+
   function clampNumber(value, min, max, fallback, step = 1) {
     if (!Number.isFinite(value)) return fallback;
     const rounded = Math.round(value / step) * step;
@@ -253,6 +292,60 @@
     }
   }
 
+  function applyMasterEnvelope(gainNode, startTime, envelope) {
+    const epsilon = 0.0001;
+    if (!envelope) {
+      gainNode.gain.setValueAtTime(epsilon, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.4, startTime + 0.015);
+      gainNode.gain.exponentialRampToValueAtTime(epsilon, startTime + 1.2);
+      return;
+    }
+    const {
+      attack = 0.012,
+      decay = 0.18,
+      sustain = 0.4,
+      release = 1.2,
+      peak = 0.5,
+      sustainLevel = 0.18,
+    } = envelope;
+    gainNode.gain.cancelScheduledValues(startTime);
+    gainNode.gain.setValueAtTime(epsilon, startTime);
+    gainNode.gain.exponentialRampToValueAtTime(Math.max(peak, epsilon * 2), startTime + attack);
+    gainNode.gain.linearRampToValueAtTime(Math.max(sustainLevel, epsilon * 2), startTime + attack + decay);
+    gainNode.gain.setValueAtTime(Math.max(sustainLevel, epsilon * 2), startTime + attack + decay + sustain);
+    gainNode.gain.exponentialRampToValueAtTime(
+      epsilon,
+      startTime + attack + decay + sustain + release
+    );
+  }
+
+  function strikeBell(targetNode, baseFrequency, startTime, options = {}) {
+    const { decay = 1.5, level = 0.8 } = options;
+    const epsilon = 0.0001;
+    BELL_PARTIALS.forEach((partial, index) => {
+      const oscillator = audioCtx.createOscillator();
+      oscillator.type = 'sine';
+      const freq = baseFrequency * partial.ratio;
+      oscillator.frequency.setValueAtTime(freq, startTime);
+      if (typeof partial.detune === 'number') {
+        oscillator.detune.setValueAtTime(partial.detune * 10, startTime);
+      }
+      const gainNode = audioCtx.createGain();
+      const peak = Math.max(partial.gain * level, epsilon * 2);
+      const partialDecay = Math.max(partial.decay * decay, 0.4);
+      const attack = 0.008 + index * 0.002;
+      gainNode.gain.setValueAtTime(epsilon, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+      gainNode.gain.exponentialRampToValueAtTime(
+        epsilon,
+        startTime + partialDecay
+      );
+      oscillator.connect(gainNode).connect(targetNode);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + partialDecay + 0.4);
+    });
+  }
+
   function playPhaseSound(phaseType) {
     if (!AudioContextClass) return;
     if (!audioCtx) {
@@ -266,28 +359,31 @@
       }
     }
     const now = audioCtx.currentTime;
-    const preset = (() => {
-      if (phaseType === 'work') {
-        return { start: 880, end: 1046.5 };
-      }
-      if (phaseType === 'finish') {
-        return { start: 659.25, end: 987.77 };
-      }
-      return { start: 523.25, end: 392 };
-    })();
-    const oscillator = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(preset.start, now);
-    oscillator.frequency.linearRampToValueAtTime(preset.end, now + 0.2);
+    const preset = BELL_CONFIGS[phaseType] || BELL_CONFIGS.default;
+    const masterGain = audioCtx.createGain();
+    applyMasterEnvelope(masterGain, now, {
+      attack: 0.01,
+      decay: 0.2,
+      sustain: 0.45,
+      release: preset.decay + 0.6,
+      peak: 0.55 * preset.level,
+      sustainLevel: 0.2 * preset.level,
+    });
+    masterGain.connect(audioCtx.destination);
 
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    const filterNode = audioCtx.createBiquadFilter();
+    filterNode.type = 'lowpass';
+    filterNode.frequency.setValueAtTime(5200, now);
+    filterNode.Q.setValueAtTime(1.2, now);
+    filterNode.connect(masterGain);
 
-    oscillator.connect(gain).connect(audioCtx.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.55);
+    for (let i = 0; i < preset.strikes; i += 1) {
+      const strikeTime = now + i * (preset.strikeInterval || 0);
+      strikeBell(filterNode, preset.baseFrequency, strikeTime, {
+        decay: preset.decay,
+        level: preset.level * (i === 0 ? 1 : 0.75),
+      });
+    }
   }
 
   function reset() {
